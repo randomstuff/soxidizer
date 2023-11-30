@@ -118,7 +118,6 @@ async fn main() -> Result<(), Error> {
         let (socket, _) = listener.accept().await?;
         tokio::spawn(async move {
             if let Err(_err) = serve_socks(proxy_service, socket).await {
-                println!("ERR");
                 // TODO,  log error
             }
         });
