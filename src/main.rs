@@ -99,8 +99,10 @@ fn make_service() -> ProxyService {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // HACK: On Linux, this makes sure the socket is not accessible by other users.
-    // In could use a chmod() after bind() but before listen()
-    // but the Rust API does not allow us to do that.
+    // - We could stduse ::fs::set_permissions after creating the socket
+    //   but the socket would be connectable for a short period of time.
+    // - We could use a chmod() after bind() and before listen()
+    //   but the Rust API does not allow us to do that.
     unsafe {
         libc::umask(S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
     }
