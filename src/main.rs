@@ -17,9 +17,7 @@ use socks::{
     read_client_hello, read_socks_request, CONNECT, NO_ACCEPTABLE_AUTHENTICATION,
     NO_AUTHENTICATION, SOCKS_VERSION5,
 };
-use tokio::io::AsyncReadExt;
-use tokio::net::unix::OwnedReadHalf;
-use tokio::net::unix::OwnedWriteHalf;
+use tokio::io::copy_bidirectional;
 use tokio::{
     io::AsyncWriteExt,
     net::{UnixListener, UnixStream},
@@ -37,38 +35,6 @@ struct CliArguments {
 struct ProxyService {
     socket_path: String,
     directory: String,
-}
-
-async fn communicate_oneway<'a>(mut read: OwnedReadHalf, mut write: OwnedWriteHalf) {
-    let mut buffer: Vec<u8> = vec![0; 4096];
-    loop {
-        let read_result = read.read(buffer.as_mut_slice()).await;
-        let read_count = match read_result {
-            Err(_) => 0,
-            Ok(read_count) => read_count,
-        };
-        if read_count == 0 {
-            let _ = write.shutdown().await;
-            return;
-        }
-        let write_res = write.write_all(&buffer[0..read_count]).await;
-        if write_res.is_err() {
-            let _ = write.shutdown().await;
-            return;
-        }
-    }
-}
-
-async fn communicate(socket1: UnixStream, socket2: UnixStream) {
-    let (read1, write1) = socket1.into_split();
-    let (read2, write2) = socket2.into_split();
-
-    tokio::spawn(async move {
-        communicate_oneway(read1, write2).await;
-    });
-    tokio::spawn(async move {
-        communicate_oneway(read2, write1).await;
-    });
 }
 
 #[instrument(skip(proxy_service, socket))]
@@ -102,7 +68,7 @@ async fn serve_socks(
 
     let socket_filename = format!("{}_{}", request.address, request.port);
     let socket_path = Path::new(&(*proxy_service).directory.as_str()).join(socket_filename);
-    let remote_socket = UnixStream::connect(socket_path).await?;
+    let mut remote_socket = UnixStream::connect(socket_path).await?;
 
     let response: [u8; 10] = [
         SOCKS_VERSION5,
@@ -118,7 +84,7 @@ async fn serve_socks(
     ];
     socket.write_all(&response).await?;
 
-    communicate(socket, remote_socket).await;
+    let _ = copy_bidirectional(&mut socket, &mut remote_socket).await;
     Ok(())
 }
 
