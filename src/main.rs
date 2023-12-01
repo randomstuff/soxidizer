@@ -1,6 +1,6 @@
 mod socks;
 
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -11,10 +11,10 @@ use libc::S_IWGRP;
 use libc::S_IWOTH;
 use libc::S_IXGRP;
 use libc::S_IXOTH;
-use socks::ATYPE_IPV4;
+use socks::AddressType;
 use socks::REP_SUCCEEDED;
 use socks::{
-    read_client_hello, read_socks_request, CONNECT, NO_ACCEPTABLE_AUTHENTICATION,
+    read_client_hello, read_socks_request, COMMAND_CONNECT, NO_ACCEPTABLE_AUTHENTICATION,
     NO_AUTHENTICATION, SOCKS_VERSION5,
 };
 use tokio::io::copy_bidirectional;
@@ -23,6 +23,11 @@ use tokio::{
     net::{UnixListener, UnixStream},
 };
 use tracing::instrument;
+use tracing::{debug, info};
+
+use crate::socks::SocksRequestAddress;
+use crate::socks::REP_ADDRESS_TYPE_NOT_SUPPORTED;
+use crate::socks::{REP_COMMAND_NOT_SUPPORTED, REP_CONNECTION_NOT_ALLOWED, REP_HOST_NOT_REACHABLE};
 
 #[derive(Parser, Debug)]
 struct CliArguments {
@@ -37,55 +42,106 @@ struct ProxyService {
     directory: String,
 }
 
-#[instrument(skip(proxy_service, socket))]
+async fn send_reply(socket: &mut UnixStream, reply: u8) -> Result<(), std::io::Error> {
+    let reply = [
+        SOCKS_VERSION5,
+        reply,
+        0,
+        AddressType::V4 as u8,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ];
+    socket.write_all(&reply).await
+}
+
+fn is_acceptable_hostname(address: &str) -> bool {
+    return !(address.contains('/')
+        || address.contains('\\')
+        || address.contains(':')
+        || address.contains('\0'));
+}
+
 async fn serve_socks(
     proxy_service: Arc<ProxyService>,
     mut socket: UnixStream,
 ) -> Result<(), Error> {
-    let methods = read_client_hello(&mut socket).await?;
+    let methods = match read_client_hello(&mut socket).await {
+        Ok(res) => res,
+        Err(err) => {
+            debug!("Could not read SOCKS hello");
+            return Err(err);
+        }
+    };
     if !methods.contains(&NO_AUTHENTICATION) {
+        info!("SOCKS reply no acceptable authentication");
         let response: [u8; 2] = [SOCKS_VERSION5, NO_ACCEPTABLE_AUTHENTICATION.to_u8()];
         socket.write_all(&response).await?;
         return Ok(());
     }
+
     let response: [u8; 2] = [SOCKS_VERSION5, NO_AUTHENTICATION.to_u8()];
     socket.write_all(&response).await?;
-    let request = read_socks_request(&mut socket).await;
-    let request = match request {
-        // TODO, return error to client
-        Err(_) => return Err(Error::from(ErrorKind::Other)),
+    let request = match read_socks_request(&mut socket).await {
+        Err(err) => {
+            debug!("Could not read SOCKS request");
+            return Err(err);
+        }
         Ok(request) => request,
     };
 
-    if request.command != CONNECT {
-        // TODO, return error to client
-        return Err(Error::from(ErrorKind::Other));
+    info!("{}", request);
+
+    if request.command != COMMAND_CONNECT {
+        info!("SOCKS reply, command not supported");
+        send_reply(&mut socket, REP_COMMAND_NOT_SUPPORTED).await?;
+        return Ok(());
     }
 
-    if request.address.contains('/') || request.address.contains('\\') {
-        return Err(Error::from(ErrorKind::Other));
+    let requested_domain = match request.address {
+        SocksRequestAddress::DomainName(r) => r,
+        _ => {
+            info!("SOCKS reply, address type not supported)");
+            send_reply(&mut socket, REP_ADDRESS_TYPE_NOT_SUPPORTED).await?;
+            return Ok(());
+        }
+    };
+
+    if !is_acceptable_hostname(&requested_domain) {
+        info!("SOCKS reply, connection not allowed (invalid domain name)");
+        send_reply(&mut socket, REP_CONNECTION_NOT_ALLOWED).await?;
+        return Ok(());
     }
 
-    let socket_filename = format!("{}_{}", request.address, request.port);
+    let socket_filename = format!("{}_{}", requested_domain, request.port);
     let socket_path = Path::new(&(*proxy_service).directory.as_str()).join(socket_filename);
-    let mut remote_socket = UnixStream::connect(socket_path).await?;
+    let mut remote_socket = match UnixStream::connect(socket_path).await {
+        Ok(res) => res,
+        Err(_) => {
+            info!("SOCKS reply, not reachable");
+            send_reply(&mut socket, REP_HOST_NOT_REACHABLE).await?;
+            return Ok(());
+        }
+    };
 
-    let response: [u8; 10] = [
-        SOCKS_VERSION5,
-        REP_SUCCEEDED,
-        0,
-        ATYPE_IPV4,
-        127,
-        0,
-        0,
-        1,
-        0,
-        0,
-    ];
-    socket.write_all(&response).await?;
+    info!("SOCKS reply, succeeded");
+    if let Err(err) = send_reply(&mut socket, REP_SUCCEEDED).await {
+        return Err(err);
+    }
 
     let _ = copy_bidirectional(&mut socket, &mut remote_socket).await;
     Ok(())
+}
+
+#[instrument(skip(proxy_service, socket))]
+async fn handle_socks_connection(proxy_service: Arc<ProxyService>, socket: UnixStream) {
+    debug!("New connection");
+    if let Err(err) = serve_socks(proxy_service, socket).await {
+        debug!(error = display(err));
+    }
 }
 
 fn make_service() -> ProxyService {
@@ -98,20 +154,23 @@ fn make_service() -> ProxyService {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    let proxy_service = make_service();
+
+    tracing_subscriber::fmt::init();
+
     // HACK: On Linux, this makes sure the socket is not accessible by other users.
     // - We could stduse ::fs::set_permissions after creating the socket
     //   but the socket would be connectable for a short period of time.
     // - We could use a chmod() after bind() and before listen()
     //   but the Rust API does not allow us to do that.
+    let original_mode;
     unsafe {
-        libc::umask(S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
-    }
-
-    let proxy_service = make_service();
-
-    tracing_subscriber::fmt::init();
-
+        original_mode = libc::umask(S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
+    };
     let listener = UnixListener::bind(proxy_service.socket_path.as_str())?;
+    unsafe {
+        libc::umask(original_mode);
+    }
 
     let proxy_service = Arc::new(proxy_service);
 
@@ -119,9 +178,7 @@ async fn main() -> Result<(), Error> {
         let proxy_service = proxy_service.clone();
         let (socket, _) = listener.accept().await?;
         tokio::spawn(async move {
-            if let Err(_err) = serve_socks(proxy_service, socket).await {
-                // TODO,  log error
-            }
+            handle_socks_connection(proxy_service, socket).await;
         });
     }
 }
