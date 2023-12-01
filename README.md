@@ -9,6 +9,8 @@ a [SOCKS5](https://datatracker.ietf.org/doc/html/rfc1928) proxy
 which listens on a [Unix domain socket](https://man7.org/linux/man-pages/man7/unix.7.html) (UDS)
 and connects to Unix domain sockets.
 
+![Screenshot](doc/screenshot-commented.png)
+
 **Why:**
 the main motivation is to conveniently serve local (user-scoped) web applications:
 
