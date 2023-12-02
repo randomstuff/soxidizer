@@ -189,11 +189,22 @@ fn make_service() -> ProxyService {
     };
 }
 
+fn is_unix_socket_path(path: &str) -> bool {
+    path.contains("/")
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let proxy_service = make_service();
 
     tracing_subscriber::fmt::init();
+
+    if !is_unix_socket_path(proxy_service.socket_path.as_str()) {
+        eprintln!(
+            "Invalid socket name, {}",
+            proxy_service.socket_path.as_str()
+        );
+    }
 
     // HACK: On Linux, this makes sure the socket is not accessible by other users.
     // - We could stduse ::fs::set_permissions after creating the socket
