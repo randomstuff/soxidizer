@@ -95,6 +95,8 @@ Warnings:
   services can be reachable (either directly of through the SOCKS proxy).
   On Linux systems,
   the SOCKS Unix domain socket created by socksidizer is only reachable by the user by default.
+  Moreover, by default, Socksidizer checks that UDS connection comes from the same user
+  and immediately closes the connection otherwise.
 
 On Linux, the following makes sure that the `"${XDG_RUNTIME_DIR}/publish"` directory
 is only reachable by the user:

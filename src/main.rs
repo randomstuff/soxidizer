@@ -1,10 +1,12 @@
 mod socks;
 
+use std::collections::HashSet;
 use std::io::Error;
 use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
+use libc::getuid;
 use libc::S_IRGRP;
 use libc::S_IROTH;
 use libc::S_IWGRP;
@@ -19,6 +21,7 @@ use socks::{
 };
 use tokio::fs::remove_file;
 use tokio::io::copy_bidirectional;
+use tokio::net::unix::uid_t;
 use tokio::signal;
 use tokio::{
     io::AsyncWriteExt,
@@ -39,11 +42,33 @@ struct CliArguments {
     socket: String,
     #[arg(long)]
     directory: String,
+    #[clap(name="allowed-uids", long, value_delimiter = ',', num_args = 1..)]
+    allowed_uids: Option<Vec<uid_t>>,
+    #[clap(name = "unfiltered", long, num_args = 0)]
+    unfiltered: bool,
 }
 
 struct ProxyService {
     socket_path: String,
     directory: String,
+    /// Optional allow-list for user IDs.
+    allowed_uids: HashSet<uid_t>,
+    unfiltered: bool,
+}
+
+impl ProxyService {
+    /// Check the socket is allowed.
+    ///
+    /// This currently checks that the peer user ID is allow-listed.
+    fn check_allowed_socket(&self, socket: &UnixStream) -> bool {
+        if self.unfiltered {
+            return true;
+        }
+        match socket.peer_cred() {
+            Err(_) => false,
+            Ok(cred) => self.allowed_uids.contains(&cred.uid()),
+        }
+    }
 }
 
 async fn send_reply(socket: &mut UnixStream, reply: u8) -> Result<(), std::io::Error> {
@@ -150,9 +175,17 @@ async fn handle_socks_connection(proxy_service: Arc<ProxyService>, socket: UnixS
 
 fn make_service() -> ProxyService {
     let args = CliArguments::parse();
+
+    let uid: uid_t;
+    unsafe {
+        uid = getuid();
+    }
+
     return ProxyService {
         socket_path: args.socket,
         directory: args.directory,
+        allowed_uids: HashSet::from([uid]),
+        unfiltered: args.unfiltered,
     };
 }
 
@@ -192,11 +225,15 @@ async fn main() -> Result<(), Error> {
                 },
                 listened = listener.accept() => {
                     let (socket, _) = match listened {
-                        Err(_) => {
-                            break;
-                        },
+                        Err(_) => break,
                         Ok(res) => res
                     };
+
+                    if !(proxy_service2).check_allowed_socket(&socket) {
+                        debug!("Connection rejected");
+                        continue;
+                    }
+
                     let proxy_service = proxy_service2.clone();
                     tracker2.spawn(async move {
                         handle_socks_connection(proxy_service, socket).await;
