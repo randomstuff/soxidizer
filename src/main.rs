@@ -17,11 +17,15 @@ use socks::{
     read_client_hello, read_socks_request, COMMAND_CONNECT, NO_ACCEPTABLE_AUTHENTICATION,
     NO_AUTHENTICATION, SOCKS_VERSION5,
 };
+use tokio::fs::remove_file;
 use tokio::io::copy_bidirectional;
+use tokio::signal;
 use tokio::{
     io::AsyncWriteExt,
     net::{UnixListener, UnixStream},
 };
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::instrument;
 use tracing::{debug, info};
 
@@ -173,12 +177,45 @@ async fn main() -> Result<(), Error> {
     }
 
     let proxy_service = Arc::new(proxy_service);
+    let token = CancellationToken::new();
+    let tracker = TaskTracker::new();
 
-    loop {
-        let proxy_service = proxy_service.clone();
-        let (socket, _) = listener.accept().await?;
-        tokio::spawn(async move {
-            handle_socks_connection(proxy_service, socket).await;
-        });
+    let proxy_service2 = proxy_service.clone();
+    let token2 = token.clone();
+    let tracker2 = tracker.clone();
+
+    tracker.spawn(async move {
+        loop {
+            tokio::select! {
+                _ = token2.cancelled() => {
+                    break;
+                },
+                listened = listener.accept() => {
+                    let (socket, _) = match listened {
+                        Err(_) => {
+                            break;
+                        },
+                        Ok(res) => res
+                    };
+                    let proxy_service = proxy_service2.clone();
+                    tracker2.spawn(async move {
+                        handle_socks_connection(proxy_service, socket).await;
+                    });
+                }
+            }
+        }
+        token2.cancel();
+        tracker2.close();
+    });
+
+    tokio::select! {
+        _ = signal::ctrl_c() => {},
+        _ = token.cancelled() => {},
     }
+    info!("Shutting down");
+    let _ = remove_file(proxy_service.socket_path.as_str()).await;
+    token.cancel();
+    tracker.wait().await;
+
+    Ok(())
 }
