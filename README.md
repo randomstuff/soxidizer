@@ -73,7 +73,7 @@ cargo build
 Build and execute:
 
 ~~~sh
-cargo run -- --socket "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
+cargo run -- "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
 ~~~
 
 
@@ -81,7 +81,7 @@ cargo run -- --socket "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_
 
 ~~~sh
 (umask 077 ; mkdir -p "${XDG_RUNTIME_DIR}/publish" && chmod 700 ${XDG_RUNTIME_DIR}/publish)
-socksidizer --socket "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
+socksidizer "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
 ~~~
 
 Warnings:

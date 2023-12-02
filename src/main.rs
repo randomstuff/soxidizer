@@ -38,13 +38,13 @@ use crate::socks::{REP_COMMAND_NOT_SUPPORTED, REP_CONNECTION_NOT_ALLOWED, REP_HO
 
 #[derive(Parser, Debug)]
 struct CliArguments {
-    #[arg(long)]
+    #[arg(name = "SOCKET")]
     socket: String,
     #[arg(long)]
     directory: String,
-    #[clap(name="allowed-uids", long, value_delimiter = ',', num_args = 1..)]
+    #[clap(long = "allowed-uids", value_delimiter = ',')]
     allowed_uids: Option<Vec<uid_t>>,
-    #[clap(name = "unfiltered", long, num_args = 0)]
+    #[clap(long = "unfiltered", num_args = 0)]
     unfiltered: bool,
 }
 
