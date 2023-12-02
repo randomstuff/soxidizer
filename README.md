@@ -11,6 +11,15 @@ and connects to Unix domain sockets.
 
 ![Screenshot](doc/screenshot-commented.png)
 
+Example protocol stack:
+
+<pre>
+[HTTP ]<----------------->[HTTP ]
+[SOCKS]<-->[SOCKS]        [-----]
+[UDS  ]<-->[UDS  ]<------>[UDS  ]
+Firefox    Socksidizer    Local Service
+</pre>
+
 **Why:**
 the main motivation is to conveniently serve local (user-scoped) web applications:
 
@@ -217,6 +226,16 @@ gunicorn --bind unix:${XDG_RUNTIME_DIR}/publish/app.foo.local_80 api:app
 ~~~js
 server.listen(process.env.process.env.XDG_RUNTIME_DIR + "/publish/app.foo.local_80")
 ~~~
+
+
+## FAQ
+
+**Can I do the same thing with Chrome (or another browser)?**
+
+As far as I understand, Firefox (and its derivative) is the only browser
+which can talk to a SOCKS proxy over UDS. It would be possible to have
+Socksidizer listen on TCP localhost. This could be useful
+but other local users would still be able to connect to the SOCKS proxy.
 
 
 ## References
