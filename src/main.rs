@@ -2,6 +2,9 @@ mod socks;
 
 use std::collections::HashSet;
 use std::io::Error;
+use std::io::ErrorKind;
+use std::net::AddrParseError;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -14,7 +17,11 @@ use socks::{
 };
 use tokio::fs::remove_file;
 use tokio::io::copy_bidirectional;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
 use tokio::net::unix::uid_t;
+use tokio::net::TcpListener;
+use tokio::net::TcpStream;
 use tokio::signal;
 use tokio::{
     io::AsyncWriteExt,
@@ -29,39 +36,66 @@ use crate::socks::SocksRequestAddress;
 use crate::socks::REP_ADDRESS_TYPE_NOT_SUPPORTED;
 use crate::socks::{REP_COMMAND_NOT_SUPPORTED, REP_CONNECTION_NOT_ALLOWED, REP_HOST_NOT_REACHABLE};
 
+trait GenericStream: AsyncRead + AsyncWrite {
+    fn get_uid(&self) -> Result<uid_t, std::io::Error>;
+}
+
+impl GenericStream for UnixStream {
+    fn get_uid(&self) -> Result<uid_t, std::io::Error> {
+        self.peer_cred().map(|cred| cred.uid())
+    }
+}
+
+impl GenericStream for TcpStream {
+    fn get_uid(&self) -> Result<uid_t, std::io::Error> {
+        // Not implemented yet:
+        return Err(Error::from(ErrorKind::Other));
+    }
+}
+
 #[derive(Parser, Debug)]
 struct CliArguments {
     #[arg(name = "SOCKET")]
-    socket: String,
+    sockets: Vec<String>,
     #[arg(long)]
     directory: String,
     #[clap(long = "allowed-uids", value_delimiter = ',')]
     allowed_uids: Option<Vec<uid_t>>,
 }
 
+enum SocketEndpoint {
+    UnixSocketEndpoint(String),
+    TcpSocketEndpoint(SocketAddr),
+}
+
 struct ProxyService {
-    socket_path: String,
+    socket_endpoints: Vec<SocketEndpoint>,
     directory: String,
     /// Optional allow-list for user IDs.
     allowed_uids: Option<HashSet<uid_t>>,
+    cancellation_token: CancellationToken,
+    tracker: TaskTracker,
 }
 
 impl ProxyService {
     /// Check the socket is allowed.
     ///
     /// This currently checks that the peer user ID is allow-listed.
-    fn check_allowed_socket(&self, socket: &UnixStream) -> bool {
+    fn check_allowed_socket<T: GenericStream>(&self, socket: &T) -> bool {
         match self.allowed_uids {
             None => true,
-            Some(ref allowed_uids) => match socket.peer_cred() {
+            Some(ref allowed_uids) => match socket.get_uid() {
                 Err(_) => false,
-                Ok(cred) => allowed_uids.contains(&cred.uid()),
+                Ok(ref uid) => allowed_uids.contains(uid),
             },
         }
     }
 }
 
-async fn send_reply(socket: &mut UnixStream, reply: u8) -> Result<(), std::io::Error> {
+async fn send_reply<T: AsyncWrite + Unpin>(
+    socket: &mut T,
+    reply: u8,
+) -> Result<(), std::io::Error> {
     let reply = [
         SOCKS_VERSION5,
         reply,
@@ -84,9 +118,9 @@ fn is_acceptable_hostname(address: &str) -> bool {
         || address.contains('\0'));
 }
 
-async fn serve_socks(
+async fn serve_socks<T: AsyncRead + AsyncWrite + Unpin>(
     proxy_service: Arc<ProxyService>,
-    mut socket: UnixStream,
+    mut socket: T,
 ) -> Result<(), Error> {
     let methods = match read_client_hello(&mut socket).await {
         Ok(res) => res,
@@ -156,7 +190,10 @@ async fn serve_socks(
 }
 
 #[instrument(skip(proxy_service, socket))]
-async fn handle_socks_connection(proxy_service: Arc<ProxyService>, socket: UnixStream) {
+async fn handle_socks_connection<T: AsyncRead + AsyncWrite + Unpin>(
+    proxy_service: Arc<ProxyService>,
+    socket: T,
+) {
     debug!("New connection");
     if let Err(err) = serve_socks(proxy_service, socket).await {
         debug!(error = display(err));
@@ -166,77 +203,130 @@ async fn handle_socks_connection(proxy_service: Arc<ProxyService>, socket: UnixS
 fn make_service() -> ProxyService {
     let args = CliArguments::parse();
     return ProxyService {
-        socket_path: args.socket,
+        socket_endpoints: args
+            .sockets
+            .into_iter()
+            .map(|endpoint| {
+                let parsed: Result<std::net::SocketAddr, AddrParseError> = endpoint.parse();
+                match parsed {
+                    Err(_) => SocketEndpoint::UnixSocketEndpoint(endpoint),
+                    Ok(a) => SocketEndpoint::TcpSocketEndpoint(a),
+                }
+            })
+            .collect(),
         directory: args.directory,
         allowed_uids: args
             .allowed_uids
             .map(|allowed_uids| HashSet::from_iter(allowed_uids.into_iter())),
+        cancellation_token: CancellationToken::new(),
+        tracker: TaskTracker::new(),
     };
 }
 
-fn is_unix_socket_path(path: &str) -> bool {
-    path.contains("/")
+async fn accept_unix_socks_connections(proxy_service: Arc<ProxyService>, listener: UnixListener) {
+    loop {
+        tokio::select! {
+            _ = proxy_service.cancellation_token.cancelled() => {
+                break;
+            },
+            listened = listener.accept() => {
+                let (socket, _) = match listened {
+                    Err(_) => break,
+                    Ok(res) => res
+                };
+
+                if !proxy_service.check_allowed_socket(&socket) {
+                    debug!("Connection rejected");
+                    continue;
+                }
+
+                let proxy_service3 = proxy_service.clone();
+                proxy_service.tracker.spawn(async move {
+                    handle_socks_connection(proxy_service3, socket).await;
+                });
+            }
+        }
+    }
+    proxy_service.cancellation_token.cancel();
+    proxy_service.tracker.close();
+}
+
+async fn accept_tcp_socks_connections(proxy_service: Arc<ProxyService>, listener: TcpListener) {
+    loop {
+        tokio::select! {
+            _ = proxy_service.cancellation_token.cancelled() => {
+                break;
+            },
+            listened = listener.accept() => {
+                let (socket, _) = match listened {
+                    Err(_) => break,
+                    Ok(res) => res
+                };
+
+                if !proxy_service.check_allowed_socket(&socket) {
+                    debug!("Connection rejected");
+                    continue;
+                }
+
+                let proxy_service3 = proxy_service.clone();
+                proxy_service.tracker.spawn(async move {
+                    handle_socks_connection(proxy_service3, socket).await;
+                });
+            }
+        }
+    }
+    proxy_service.cancellation_token.cancel();
+    proxy_service.tracker.close();
+}
+
+async fn start_unix_socket(proxy_service: &Arc<ProxyService>, path: &str) -> Result<(), Error> {
+    let listener = UnixListener::bind(path)?;
+    let proxy_service2 = proxy_service.clone();
+    let path = String::from(path);
+    proxy_service.tracker.spawn(async move {
+        let _ = accept_unix_socks_connections(proxy_service2, listener).await;
+        let _ = remove_file(path).await;
+    });
+    Ok(())
+}
+
+async fn start_tcp_socket(
+    proxy_service: &Arc<ProxyService>,
+    address: SocketAddr,
+) -> Result<(), Error> {
+    let listener = TcpListener::bind(address).await?;
+    let proxy_service2 = proxy_service.clone();
+    proxy_service.tracker.spawn(async move {
+        let _ = accept_tcp_socks_connections(proxy_service2, listener).await;
+    });
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let proxy_service = make_service();
+    let proxy_service = Arc::new(proxy_service);
 
     tracing_subscriber::fmt::init();
 
-    if !is_unix_socket_path(proxy_service.socket_path.as_str()) {
-        eprintln!(
-            "Invalid socket name, {}",
-            proxy_service.socket_path.as_str()
-        );
-    }
-
-    let listener = UnixListener::bind(proxy_service.socket_path.as_str())?;
-
-    let proxy_service = Arc::new(proxy_service);
-    let token = CancellationToken::new();
-    let tracker = TaskTracker::new();
-
-    let proxy_service2 = proxy_service.clone();
-    let token2 = token.clone();
-    let tracker2 = tracker.clone();
-
-    tracker.spawn(async move {
-        loop {
-            tokio::select! {
-                _ = token2.cancelled() => {
-                    break;
-                },
-                listened = listener.accept() => {
-                    let (socket, _) = match listened {
-                        Err(_) => break,
-                        Ok(res) => res
-                    };
-
-                    if !(proxy_service2).check_allowed_socket(&socket) {
-                        debug!("Connection rejected");
-                        continue;
-                    }
-
-                    let proxy_service = proxy_service2.clone();
-                    tracker2.spawn(async move {
-                        handle_socks_connection(proxy_service, socket).await;
-                    });
-                }
+    for socket_enpoint in &(*proxy_service).socket_endpoints {
+        match socket_enpoint {
+            SocketEndpoint::UnixSocketEndpoint(path) => {
+                start_unix_socket(&proxy_service, path.as_str()).await?
+            }
+            SocketEndpoint::TcpSocketEndpoint(address) => {
+                start_tcp_socket(&proxy_service, *address).await?
             }
         }
-        token2.cancel();
-        tracker2.close();
-    });
+    }
 
     tokio::select! {
         _ = signal::ctrl_c() => {},
-        _ = token.cancelled() => {},
+        _ = proxy_service.cancellation_token.cancelled() => {},
     }
     info!("Shutting down");
-    let _ = remove_file(proxy_service.socket_path.as_str()).await;
-    token.cancel();
-    tracker.wait().await;
+    proxy_service.cancellation_token.cancel();
+    proxy_service.tracker.wait().await;
 
     Ok(())
 }

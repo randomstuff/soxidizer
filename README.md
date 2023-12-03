@@ -31,7 +31,8 @@ the main motivation is to conveniently serve local (user-scoped) web application
 
 Current features:
 
-* listen on a Unix domain socket;
+* listen on Unix domain sockets;
+* listen on TCP sockets;
 * SOCKS5 protocol;
 * SOCKS addressing using domain name (aka `socks5h`);
 * SOCKS5 CONNECT method (used for TCP connections);
@@ -39,7 +40,6 @@ Current features:
 
 Potential upcoming features:
 
-* listen on TCP sockets;
 * support for socket activation;
 * more flexible configuration;
 * support for connecting to the requested service using a shell command (similar to OpenSSH `ProxyCommand`);
@@ -79,11 +79,18 @@ cargo run -- "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_RUNTIME_D
 ~~~
 
 
-## Execution
+## Usage
+
+Listen on a Unix domain socket:
 
 ~~~sh
-(umask 077 ; mkdir -p "${XDG_RUNTIME_DIR}/publish" && chmod 700 ${XDG_RUNTIME_DIR}/publish)
 socksidizer "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
+~~~
+
+Listen on a TCP socket:
+
+~~~sh
+socksidizer 127.0.0.1:9000 --directory "${XDG_RUNTIME_DIR}/publish"
 ~~~
 
 Warnings:

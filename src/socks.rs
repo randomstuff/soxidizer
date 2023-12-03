@@ -4,7 +4,8 @@ use std::io::{Error, ErrorKind, Result};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str;
 
-use tokio::{io::AsyncReadExt, net::UnixStream};
+use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 pub static SOCKS_VERSION5: u8 = 5;
 
@@ -42,7 +43,9 @@ impl SocksCommand {
 pub static NO_AUTHENTICATION: AuthenticationMethod = AuthenticationMethod(0);
 pub static NO_ACCEPTABLE_AUTHENTICATION: AuthenticationMethod = AuthenticationMethod(255);
 
-pub async fn read_client_hello(read: &mut UnixStream) -> Result<Vec<AuthenticationMethod>> {
+pub async fn read_client_hello<T: AsyncRead + AsyncWrite + Unpin>(
+    read: &mut T,
+) -> Result<Vec<AuthenticationMethod>> {
     let mut buffer: [u8; 256] = [0; 256];
     let mut total_read: usize = 0;
     while total_read < buffer.len() {
@@ -122,7 +125,9 @@ impl Display for SocksRequest {
     }
 }
 
-pub async fn read_socks_request(read: &mut UnixStream) -> Result<SocksRequest> {
+pub async fn read_socks_request<T: AsyncRead + AsyncWrite + Unpin>(
+    read: &mut T,
+) -> Result<SocksRequest> {
     let mut buffer: [u8; 512] = [0; 512];
     let mut total_read: usize = 0;
     while total_read < buffer.len() {
