@@ -93,19 +93,9 @@ Warnings:
   which has unrelated UDS.
 * Depending on the permissions on the Unix domain sockets and the parents directories,
   services can be reachable (either directly of through the SOCKS proxy).
-  On Linux systems,
-  the SOCKS Unix domain socket created by socksidizer is only reachable by the user by default.
-  Moreover, by default, Socksidizer checks that UDS connection comes from the same user
-  and immediately closes the connection otherwise.
 
-On Linux, the following makes sure that the `"${XDG_RUNTIME_DIR}/publish"` directory
-is only reachable by the user:
-
-~~~sh
-(umask 077 ; mkdir -p "${XDG_RUNTIME_DIR}/publish" && chmod 700 ${XDG_RUNTIME_DIR}/publish)
-~~~
-
-Warning: `umask 077 && my_command` does not work.
+On Linux systems, `${XDG_RUNTIME_DIR}` is not reachable for other users
+and should be used if your do not want to exposer your service to other users.
 
 
 ## Client configuration
@@ -198,7 +188,7 @@ you can access it even if is not published by Podman:
 
 ~~~sh
 pid="$(podman inspect $container_name -f '{{.State.Pid}}')"
-nsenter -t "$pid" -U -n socat UNIX-LISTEN:${XDG_RUNTIME_DIR}/publish/app.foo.local_80,mode=mode=700,fork TCP:127.0.0.1:8000
+nsenter -t "$pid" -U -n socat UNIX-LISTEN:${XDG_RUNTIME_DIR}/publish/app.foo.local_80,fork TCP:127.0.0.1:8000
 ~~~
 
 ### Flask
