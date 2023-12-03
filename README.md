@@ -146,10 +146,73 @@ Select "use proxys by template".
 
 ### Socket activation
 
-If your application supports socket-activation, you can use:
+If your application supports socket activation, you can use:
 
 ~~~sh
 systemd-socket-activate -l "${XDG_RUNTIME_DIR}/publish/app.foo.local" ./myapp
+~~~
+
+### Installation as a systemd user service
+
+If your application supports socket activation,
+you can install your service as a systemd user service.
+which will be automatically be started (on demand).
+
+Create `~/.config/systemd/user/myapp.socket`:
+
+~~~
+[Unit]
+Description=Socket for my app
+ConditionUser=!root
+
+[Socket]
+Priority=6
+Backlog=5
+ListenStream=%t/publish/myapp.foo.localhost_80
+SocketMode=0600
+DirectoryMode=0755
+
+[Install]
+WantedBy=sockets.target
+~~~
+
+Create `~/.config/systemd/user/myapp.service`:
+
+~~~
+[Unit]
+Description=My app
+Requires=foo.socket
+ConditionUser=!root
+
+[Service]
+ExecStart=%h/bin/myapp
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+Restart=on-failure
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+Type=simple
+UMask=0077
+Slice=session.slice
+
+[Install]
+Also=foo.socket
+WantedBy=default.target
+~~~
+
+Enable the new units:
+
+~~~sh
+systemctl --user enable foo.socket
+systemctl --user enable foo.service
+~~~
+
+Start the socket:
+
+~~~sh
+systemctl --user start foo.socket
 ~~~
 
 ### SSH relay
