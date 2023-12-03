@@ -42,12 +42,14 @@ Potential upcoming features:
 * listen on TCP sockets;
 * support for socket activation;
 * more flexible configuration;
-* support for connecting to the requested service using a shell command (similar to OpenSSH `ProxyCommand`).
+* support for connecting to the requested service using a shell command (similar to OpenSSH `ProxyCommand`);
+* filter incoming TCPs connection by user ID (`/proc/net/tcp`).
 
 Features which probably won't be implemented:
 
-* SOCKS authentication (is that useful?);
-* UDP ASSOCIATE support;
+* SOCKS authentication (does not seem to be widely implemented);
+* SOCKS UDP ASSOCIATE command support;
+* SOCKS BIND command support;
 * SOCKS addressing using IP address.
 
 ### Explanations
