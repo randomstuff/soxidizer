@@ -141,6 +141,20 @@ Add a pattern for this proxy:
 
 Select "use proxys by template".
 
+### CURL
+
+CURL can use a UDS SOCKS proxy with a proxy URI of the form:
+
+~~~
+socks5h://localhost/run/user/1000/socksidizer.socks
+~~~
+
+Example:
+
+~~~sh
+curl -x socks5h://localhost/run/user/1000/socksidizer.socks http://app.foo.local
+~~~
+
 
 ## Service configuration
 
@@ -228,20 +242,6 @@ If the remote sevice is available over UDS:
 
 ~~~sh
 ssh target -N -L "${XDG_RUNTIME_DIR}/publish/app.foo.local_80:/run/foo.sock
-~~~
-
-### CURL
-
-CURL can use a UDS SOCKS proxy with a proxy URI of the form:
-
-~~~
-socks5h://localhost/run/user/1000/socksidizer.socks
-~~~
-
-Example:
-
-~~~sh
-curl -x socks5h://localhost/run/user/1000/socksidizer.socks http://app.foo.local
 ~~~
 
 ### Podman
