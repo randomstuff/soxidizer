@@ -6,13 +6,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use libc::getuid;
-use libc::S_IRGRP;
-use libc::S_IROTH;
-use libc::S_IWGRP;
-use libc::S_IWOTH;
-use libc::S_IXGRP;
-use libc::S_IXOTH;
 use socks::AddressType;
 use socks::REP_SUCCEEDED;
 use socks::{
@@ -44,16 +37,13 @@ struct CliArguments {
     directory: String,
     #[clap(long = "allowed-uids", value_delimiter = ',')]
     allowed_uids: Option<Vec<uid_t>>,
-    #[clap(long = "unfiltered", num_args = 0)]
-    unfiltered: bool,
 }
 
 struct ProxyService {
     socket_path: String,
     directory: String,
     /// Optional allow-list for user IDs.
-    allowed_uids: HashSet<uid_t>,
-    unfiltered: bool,
+    allowed_uids: Option<HashSet<uid_t>>,
 }
 
 impl ProxyService {
@@ -61,12 +51,12 @@ impl ProxyService {
     ///
     /// This currently checks that the peer user ID is allow-listed.
     fn check_allowed_socket(&self, socket: &UnixStream) -> bool {
-        if self.unfiltered {
-            return true;
-        }
-        match socket.peer_cred() {
-            Err(_) => false,
-            Ok(cred) => self.allowed_uids.contains(&cred.uid()),
+        match self.allowed_uids {
+            None => true,
+            Some(ref allowed_uids) => match socket.peer_cred() {
+                Err(_) => false,
+                Ok(cred) => allowed_uids.contains(&cred.uid()),
+            },
         }
     }
 }
@@ -175,17 +165,12 @@ async fn handle_socks_connection(proxy_service: Arc<ProxyService>, socket: UnixS
 
 fn make_service() -> ProxyService {
     let args = CliArguments::parse();
-
-    let uid: uid_t;
-    unsafe {
-        uid = getuid();
-    }
-
     return ProxyService {
         socket_path: args.socket,
         directory: args.directory,
-        allowed_uids: HashSet::from([uid]),
-        unfiltered: args.unfiltered,
+        allowed_uids: args
+            .allowed_uids
+            .map(|allowed_uids| HashSet::from_iter(allowed_uids.into_iter())),
     };
 }
 
@@ -206,19 +191,7 @@ async fn main() -> Result<(), Error> {
         );
     }
 
-    // HACK: On Linux, this makes sure the socket is not accessible by other users.
-    // - We could stduse ::fs::set_permissions after creating the socket
-    //   but the socket would be connectable for a short period of time.
-    // - We could use a chmod() after bind() and before listen()
-    //   but the Rust API does not allow us to do that.
-    let original_mode;
-    unsafe {
-        original_mode = libc::umask(S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
-    };
     let listener = UnixListener::bind(proxy_service.socket_path.as_str())?;
-    unsafe {
-        libc::umask(original_mode);
-    }
 
     let proxy_service = Arc::new(proxy_service);
     let token = CancellationToken::new();
