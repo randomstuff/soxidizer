@@ -33,6 +33,7 @@ Current features:
 
 * listen on Unix domain sockets;
 * listen on TCP sockets;
+* support for socket activation (TCP and UDP sockets);
 * SOCKS5 protocol;
 * SOCKS addressing using domain name (aka `socks5h`);
 * SOCKS5 CONNECT method (used for TCP connections);
@@ -40,7 +41,7 @@ Current features:
 
 Potential upcoming features:
 
-* support for socket activation;
+
 * more flexible configuration;
 * support for connecting to the requested service using a shell command (similar to OpenSSH `ProxyCommand`);
 * filter incoming TCPs connection by user ID (`/proc/net/tcp`).
@@ -183,7 +184,7 @@ which will be automatically be started (on demand).
 
 Create `~/.config/systemd/user/myapp.socket`:
 
-~~~
+~~~ini
 [Unit]
 Description=Socket for my app
 ConditionUser=!root
@@ -201,7 +202,7 @@ WantedBy=sockets.target
 
 Create `~/.config/systemd/user/myapp.service`:
 
-~~~
+~~~ini
 [Unit]
 Description=My app
 Requires=foo.socket

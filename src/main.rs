@@ -1,14 +1,26 @@
 mod socks;
 
 use std::collections::HashSet;
+use std::env;
 use std::io::Error;
 use std::io::ErrorKind;
+use std::mem::size_of_val;
 use std::net::AddrParseError;
 use std::net::SocketAddr;
+use std::os::fd::FromRawFd;
+use std::os::fd::RawFd;
 use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
+use libc::c_int;
+use libc::c_void;
+use libc::getsockopt;
+use libc::socklen_t;
+use libc::AF_INET;
+use libc::AF_INET6;
+use libc::SOL_SOCKET;
+use libc::SO_DOMAIN;
 use socks::AddressType;
 use socks::REP_SUCCEEDED;
 use socks::{
@@ -302,6 +314,75 @@ async fn start_tcp_socket(
     Ok(())
 }
 
+enum AnyListener {
+    Tcp(TcpListener),
+    Unix(UnixListener),
+}
+
+unsafe fn from_raw_fd(fd: RawFd) -> Result<AnyListener, Error> {
+    let mut socket_family: c_int = 0;
+    let mut socklen: socklen_t = size_of_val(&socket_family) as socklen_t;
+    getsockopt(
+        fd,
+        SOL_SOCKET,
+        SO_DOMAIN,
+        &mut socket_family as *mut c_int as *mut c_void,
+        &mut socklen as *mut socklen_t,
+    );
+
+    if socket_family == AF_INET || socket_family == AF_INET6 {
+        let raw_listener = std::net::TcpListener::from_raw_fd(fd);
+        raw_listener.set_nonblocking(true)?;
+        return Ok(AnyListener::Tcp(TcpListener::from_std(raw_listener)?));
+    } else {
+        let raw_listener = std::os::unix::net::UnixListener::from_raw_fd(fd);
+        raw_listener.set_nonblocking(true)?;
+        return Ok(AnyListener::Unix(UnixListener::from_std(raw_listener)?));
+    }
+}
+
+fn handle_socket_activation(proxy_service: &Arc<ProxyService>) -> Result<(), Error> {
+    if env::var("LISTEN_PID")
+        .ok()
+        .and_then(|var| var.parse::<u32>().ok())
+        .map_or(true, |listen_pid| listen_pid != std::process::id())
+    {
+        return Ok(());
+    }
+
+    let fd_count = env::var("LISTEN_FDS")
+        .ok()
+        .and_then(|var| var.parse::<u32>().ok())
+        .unwrap_or(0);
+
+    // TODO, handle LISTEN_FDNAMES
+
+    for fd in 3..(3 + fd_count) {
+        let listeners;
+        unsafe {
+            listeners = from_raw_fd(fd as RawFd);
+        }
+
+        let proxy_service2 = proxy_service.clone();
+        match listeners? {
+            AnyListener::Tcp(listener) => {
+                info!("Listening to TCP socket #{}", fd);
+                proxy_service.tracker.spawn(async move {
+                    let _ = accept_tcp_socks_connections(proxy_service2, listener).await;
+                })
+            }
+            AnyListener::Unix(listener) => {
+                info!("Listening to Unix domain socket #{}", fd);
+                proxy_service.tracker.spawn(async move {
+                    let _ = accept_unix_socks_connections(proxy_service2, listener).await;
+                })
+            }
+        };
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let proxy_service = make_service();
@@ -309,15 +390,23 @@ async fn main() -> Result<(), Error> {
 
     tracing_subscriber::fmt::init();
 
+    handle_socket_activation(&proxy_service)?;
+
     for socket_enpoint in &(*proxy_service).socket_endpoints {
         match socket_enpoint {
             SocketEndpoint::UnixSocketEndpoint(path) => {
+                info!("Listening to Unix domain socket {}", path);
                 start_unix_socket(&proxy_service, path.as_str()).await?
             }
             SocketEndpoint::TcpSocketEndpoint(address) => {
+                info!("Listening to TCP domain socket {}", *address);
                 start_tcp_socket(&proxy_service, *address).await?
             }
         }
+    }
+
+    if proxy_service.tracker.is_empty() {
+        return Err(Error::from(ErrorKind::Other));
     }
 
     tokio::select! {
