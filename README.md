@@ -1,4 +1,4 @@
-# Socksidizer
+# Soxidizer
 
 Warning: this is a prototype!
 
@@ -17,7 +17,7 @@ Example protocol stack:
 [HTTP ]<----------------->[HTTP ]
 [SOCKS]<-->[SOCKS]        [-----]
 [UDS  ]<-->[UDS  ]<------>[UDS  ]
-Firefox    Socksidizer    Local Service
+Firefox    soxidizer      Local Service
 </pre>
 
 **Why:**
@@ -57,10 +57,10 @@ Features which probably won't be implemented:
 
 This works like this:
 
-1. socksidizer accepts connection on some UDS socks (eg. `/run/user/${PID}/socksidizer.socks`);
-2. socksidizer receives a SOCKS5 proxy (CONNECT) request from the client;
-3. socksidizer translates this request into a pathname of the form `{directory}/{hostname}_{port}` (eg. `/run/user/${PID}/published/myapp.john.local_443`) and connects to this socket;
-4. socksidizer relays data between the client and the service.
+1. soxidizer accepts connection on some UDS socks (eg. `/run/user/${PID}/soxidizer.socks`);
+2. soxidizer receives a SOCKS5 proxy (CONNECT) request from the client;
+3. soxidizer translates this request into a pathname of the form `{directory}/{hostname}_{port}` (eg. `/run/user/${PID}/published/myapp.john.local_443`) and connects to this socket;
+4. soxidizer relays data between the client and the service.
 
 This currently requires a client which supports SOCKS5 over UDS.
 Firefox and its derivatives support this.
@@ -76,7 +76,7 @@ cargo build
 Build and execute:
 
 ~~~sh
-cargo run -- "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
+cargo run -- "${XDG_RUNTIME_DIR}/soxidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
 ~~~
 
 
@@ -85,13 +85,13 @@ cargo run -- "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_RUNTIME_D
 Listen on a Unix domain socket:
 
 ~~~sh
-socksidizer "${XDG_RUNTIME_DIR}/socksidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
+soxidizer "${XDG_RUNTIME_DIR}/soxidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
 ~~~
 
 Listen on a TCP socket:
 
 ~~~sh
-socksidizer 127.0.0.1:9000 --directory "${XDG_RUNTIME_DIR}/publish"
+soxidizer 127.0.0.1:9000 --directory "${XDG_RUNTIME_DIR}/publish"
 ~~~
 
 Warnings:
@@ -115,7 +115,7 @@ and should be used if your do not want to exposer your service to other users.
 You can configure Firefox to use a UDS SOCKS proxy.
 In the Network configuration:,
 
-* usa a value of the form `file:///run/user/${PID}/socksidizer.socks` in SOCKS proxy;
+* usa a value of the form `file:///run/user/${PID}/soxidizer.socks` in SOCKS proxy;
 * choose SOCKS5;
 * the port is ignored.
 
@@ -132,12 +132,12 @@ Note: it is not possible to configure UDS proxy using Proxy Auto-Configuration (
 [FoxyProxy](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/)
 lets you define different network configurations depending on the target URI
 i.e. you can use your default network configuretion (eg. no proxy) for most URIS
-but use Socksidizer to reach some URIS (eg. `http://*.foo.localhost`).
+but use Soxidizer to reach some URIS (eg. `http://*.foo.localhost`).
 
 Add a new proxy in FoxyProxy configuration:
 
 * choose "SOCKS5" for the proxy type;
-* enter an address of the form `file:///run/user/${PID}/socksidizer.socks`;
+* enter an address of the form `file:///run/user/${PID}/soxidizer.socks`;
 * enter any value for the port (it is ignored);
 * check "Send DNS through SOCKS5 proxy";
 * enable it.
@@ -156,13 +156,13 @@ Select "use proxys by template".
 CURL can use a UDS SOCKS proxy with a proxy URI of the form:
 
 ~~~
-socks5h://localhost/run/user/1000/socksidizer.socks
+socks5h://localhost/run/user/1000/soxidizer.socks
 ~~~
 
 Example:
 
 ~~~sh
-curl -x socks5h://localhost/run/user/1000/socksidizer.socks http://app.foo.local
+curl -x socks5h://localhost/run/user/1000/soxidizer.socks http://app.foo.local
 ~~~
 
 
@@ -299,7 +299,7 @@ server.listen(process.env.process.env.XDG_RUNTIME_DIR + "/publish/app.foo.local_
 
 As far as I understand, Firefox (and its derivative) is the only browser
 which can talk to a SOCKS proxy over UDS. It would be possible to have
-Socksidizer listen on TCP localhost. This could be useful
+Soxidizer listen on TCP localhost. This could be useful
 but other local users would still be able to connect to the SOCKS proxy.
 
 
