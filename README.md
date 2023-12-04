@@ -4,28 +4,31 @@ Warning: this is a prototype!
 
 ## Overview
 
-**Summary:**
-a [SOCKS5](https://datatracker.ietf.org/doc/html/rfc1928) proxy
-which listens on a [Unix domain socket](https://man7.org/linux/man-pages/man7/unix.7.html) (UDS)
-and connects to Unix domain sockets.
-
 ![Screenshot](doc/screenshot-commented.png)
+
+**Summary:**
+
+* Serve your local web applications (or other services) over Unix domain sockets (UDS).
+* Give them a nice name such as `http://myapp.foo.localhost` (instead of `http://localhost:9405`).
+* Other users on the system cannot access your local applications.
+* Works with Firefox (with [FoxyProxy](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/)) only.
+
+**How:**
+Soxidizer is [SOCKS5](https://datatracker.ietf.org/doc/html/rfc1928) proxy
+which can listen on a [Unix domain socket](https://man7.org/linux/man-pages/man7/unix.7.html)
+and connects to Unix domain sockets.
+Firefox (with some help from [FoxyProxy](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/))
+can talk to this SOCKS proxy over the Unix domain socket
+for a some chosen domain names (eg `*.foo.localhost`).
 
 Example protocol stack:
 
 <pre>
-[HTTP ]<----------------->[HTTP ]
-[SOCKS]<-->[SOCKS]        [-----]
-[UDS  ]<-->[UDS  ]<------>[UDS  ]
-Firefox    soxidizer      Local Service
+[HTTP  ]<-----------------------[HTTP ]
+[SOCKS5]<-->[SOCKS5]
+[UDS   ]<-->[UDS   |UDS]<------>[UDS  ]
+Firefox     soxidizer           Service
 </pre>
-
-**Why:**
-the main motivation is to conveniently serve local (user-scoped) web applications:
-
-* access them by application name (`http://myapp.foo.local`);
-* without managing IP addresses and TCP ports;
-* on Linux, rely on file filesystem permissions to prevent other user from accessing the service.
 
 ### Features
 
@@ -35,23 +38,21 @@ Current features:
 * listen on TCP sockets;
 * support for socket activation (TCP and UDP sockets);
 * SOCKS5 protocol;
-* SOCKS addressing using domain name (aka `socks5h`);
-* SOCKS5 CONNECT method (used for TCP connections);
-* connect to (`AF_UNIX` `SOCK_STREAM`) Unix domain sockets (of the form `{directory}/{hostname}_{port}`).
+* SOCKS5 CONNECT method with a domain name (`socks5h`);
+* connect to (`SOCK_STREAM`) Unix domain sockets (of the form `{directory}/{hostname}_{port}`).
 
 Potential upcoming features:
 
-
 * more flexible configuration;
 * support for connecting to the requested service using a shell command (similar to OpenSSH `ProxyCommand`);
-* filter incoming TCPs connection by user ID (`/proc/net/tcp`).
+* filter incoming TCP connections by UID (`/proc/net/tcp`).
 
 Features which probably won't be implemented:
 
-* SOCKS authentication (does not seem to be widely implemented);
+* SOCKS authentication (does not seem to be supported by clients);
 * SOCKS UDP ASSOCIATE command support;
 * SOCKS BIND command support;
-* SOCKS addressing using IP address.
+* SOCKS requests using IP address.
 
 ### Explanations
 
@@ -59,12 +60,12 @@ This works like this:
 
 1. soxidizer accepts connection on some UDS socks (eg. `/run/user/${PID}/soxidizer.socks`);
 2. soxidizer receives a SOCKS5 proxy (CONNECT) request from the client;
-3. soxidizer translates this request into a pathname of the form `{directory}/{hostname}_{port}` (eg. `/run/user/${PID}/published/myapp.john.local_443`) and connects to this socket;
+3. soxidizer translates this request into a pathname of the form `{directory}/{hostname}_{port}` (eg. `/run/user/${PID}/publish/myapp.john.local_443`) and connects to this socket;
 4. soxidizer relays data between the client and the service.
 
 This currently requires a client which supports SOCKS5 over UDS.
 Firefox and its derivatives support this.
-Other browsers currently do not support this as far as I known.
+Other browsers currently do not support this.
 
 
 ## Build
@@ -88,31 +89,72 @@ Listen on a Unix domain socket:
 soxidizer "${XDG_RUNTIME_DIR}/soxidizer.socks" --directory "${XDG_RUNTIME_DIR}/publish"
 ~~~
 
+You should use a dedicated directory for storing the sockets of the published services.
+Do *not* use a directory which contains other unrelated UDS (such as `${XDG_RUNTIME_DIR}` / `/var/run/${PID}`)
+in order to make sure the proxy does not provide access to unrelated services.
+
 Listen on a TCP socket:
 
 ~~~sh
 soxidizer 127.0.0.1:9000 --directory "${XDG_RUNTIME_DIR}/publish"
 ~~~
 
-Warnings:
 
-* Even if the service is only *directly* available to the system user,
-  a malicious website could still attempt to attack it by exploiting your browser (CSRF attacks).
-* You must use a dedicated directory storing the sockets of the published services.
-  Do **not** use `${XDG_RUNTIME_DIR}` (i.e. `/var/run/${PID}`) or any other directory
-  which has unrelated UDS.
-* Depending on the permissions on the Unix domain sockets and the parents directories,
-  services can be reachable (either directly of through the SOCKS proxy).
+## Security considerations
 
-On Linux systems, `${XDG_RUNTIME_DIR}` is not reachable for other users
-and should be used if your do not want to exposer your service to other users.
+### Protection from other local users
+
+On Linux, filesystem permissions are enforced for UDS:
+a user can only connect to a (non-asbtract) UDS socket
+if it has executable permissions on all parent directories and if it has write permission on the socket.
+Storing the SOCKS5 socket under `${XDG_RUNTIME_DIR}` and using a subdirectory or `${XDG_RUNTIME_DIR}`
+for services prevents other users from accessing them.
+
+On other Unix systems, Soxidizer can be configured to check the user ID associated with incoming UDS connections.
+The services would need to support a similar functionality in order to prevent other users from accessing them.
+
+### CSRF attacks
+
+Even if the service is only *directly* available to the system user,
+a malicious website could still attempt to attack it by exploiting your browser (CSRF attack):
+you should make sure your services are not vulnerable to CSRF attacks.
+
+### DNS rebinding attacks
+
+DNS rebinding attacks should not be possible if the services are only available over Unix domain sockets.
+
+### Cookie hikjacking
+
+If you serve your web application using `http://127.0.0.1:8000`,
+your application cookies (if any) are *not safe from other local users*.
+A local malicious user on the machine could run another services on `http://127.0.0.1:9000` and trick you into browsing to this service.
+Your browser would then send your cookies associated with `http://127.0.0.1:8000` to the other user service
+(because cookies currently [do not provide isolation by port](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis#section-8.5)).
+The malicious user could then use your session on your application.
+
+By serving each application in a dedicated host name,
+we can prevent different application from seing each others cookies.
+
+### Cookies poisoning
+
+Even if we are serving our application from `http://myapp.foo.ocalhost`,
+we might still be vulnerable to *cookie poisoning*.
+A malicious `http://local:9000` service,
+could still set a cookie which would be available for `http://myapp.foo.localhost`
+(`Set-Cookie: SESSION=123456; Domain=localhost`).
+
+The application can protect itself from such an attacks by
+always using [`__Host-`](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis#section-4.1.3.2)
+or [`__Secure-`](https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis#section-4.1.3.1) cookies.
+
+Note: `__Secure-` cookies are available on Firefox from `http://*.localhost:*` origins.
 
 
 ## Client configuration
 
 ### Firefox
 
-You can configure Firefox to use a UDS SOCKS proxy.
+You can configure Firefox to use a UDS-based SOCKS proxy.
 In the Network configuration:,
 
 * usa a value of the form `file:///run/user/${PID}/soxidizer.socks` in SOCKS proxy;
@@ -260,7 +302,7 @@ If your application is in a rootless (i.e. user) [Podman](https://podman.io/) co
 you can access it even if is not published by Podman:
 
 ~~~sh
-pid="$(podman inspect $container_name -f '{{.State.Pid}}')"
+pid="$(podman inspect $container -f '{{.State.Pid}}')"
 nsenter -t "$pid" -U -n socat UNIX-LISTEN:${XDG_RUNTIME_DIR}/publish/app.foo.local_80,fork TCP:127.0.0.1:8000
 ~~~
 
@@ -278,15 +320,19 @@ From Python:
 app.run(host="unix://" + os.environ["XDG_RUNTIME_DIR"] + "/publish/app.foo.local_80")
 ~~~
 
+As a WSGI application: see below.
+
 ### Python WSGI applications
 
-When served using gunicorn:
+gunicorn can serve a WSGI application over UDS:
 
 ~~~sh
 gunicorn --bind unix:${XDG_RUNTIME_DIR}/publish/app.foo.local_80 api:app
 ~~~
 
 ### Node.js
+
+Node.js can serve web applications other UDS:
 
 ~~~js
 server.listen(process.env.process.env.XDG_RUNTIME_DIR + "/publish/app.foo.local_80")
@@ -297,10 +343,11 @@ server.listen(process.env.process.env.XDG_RUNTIME_DIR + "/publish/app.foo.local_
 
 **Can I do the same thing with Chrome (or another browser)?**
 
-As far as I understand, Firefox (and its derivative) is the only browser
-which can talk to a SOCKS proxy over UDS. It would be possible to have
-Soxidizer listen on TCP localhost. This could be useful
-but other local users would still be able to connect to the SOCKS proxy.
+Firefox and its derivative are the only browsers
+which can talk to a SOCKS proxy over UDS.
+
+We can have Soxidizer listen on TCP localhost instead.
+In this case, we currently cannot prevent other local users from accessing the services.
 
 
 ## References
