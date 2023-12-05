@@ -11,13 +11,13 @@ Warning: this is a prototype!
 * Serve your local web applications (or other services) over Unix domain sockets (UDS).
 * Give them a nice name such as `http://myapp.foo.localhost` (instead of `http://localhost:9405`).
 * Other users on the system cannot access your local applications.
-* Works with Firefox (with [FoxyProxy](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/)) only.
+* Works with Firefox (with [FoxyProxy Standard](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/)) only.
 
 **How:**
 Soxidizer is [SOCKS5](https://datatracker.ietf.org/doc/html/rfc1928) proxy
 which can listen on a [Unix domain socket](https://man7.org/linux/man-pages/man7/unix.7.html)
 and connects to Unix domain sockets.
-Firefox (with some help from [FoxyProxy](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/))
+Firefox (with some help from [FoxyProxy Standard](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/))
 can talk to this SOCKS proxy over the Unix domain socket
 for a some chosen domain names (eg `*.foo.localhost`).
 
@@ -45,11 +45,10 @@ Potential upcoming features:
 
 * more flexible configuration;
 * support for connecting to the requested service using a shell command (similar to OpenSSH `ProxyCommand`);
-* filter incoming TCP connections by UID (`/proc/net/tcp`).
+* SOCKS authentication.
 
 Features which probably won't be implemented:
 
-* SOCKS authentication (does not seem to be supported by clients);
 * SOCKS UDP ASSOCIATE command support;
 * SOCKS BIND command support;
 * SOCKS requests using IP address.
@@ -165,13 +164,13 @@ However, this approach is not very usable.
 All the requests are going to go through the SOCKS proxy
 which currently does not support proxying to TCP/UDP.
 Only your web sites will be handled by the proxy.
-The solution is to install FoxyProxy (or a similar extension).
+The solution is to install FoxyProxy standard (or a similar extension).
 
 Note: it is not possible to configure UDS proxy using Proxy Auto-Configuration (`proxy.pac`).
 
-### Firefox with FoxyProxy
+### Firefox with FoxyProxy Standard
 
-[FoxyProxy](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/)
+[FoxyProxy Standard](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/)
 lets you define different network configurations depending on the target URI
 i.e. you can use your default network configuretion (eg. no proxy) for most URIS
 but use Soxidizer to reach some URIS (eg. `http://*.foo.localhost`).
@@ -192,6 +191,16 @@ Add a pattern for this proxy:
 * enabled.
 
 Select "use proxys by template".
+
+### Firefox with FoxyProxy Basic
+
+When using the newest [FoxyProxy extension](https://github.com/foxyproxy/browser-extension/),
+there are several differences:
+
+* [UDS SOCKS proxy does not seem to be working](https://github.com/foxyproxy/browser-extension/issues/47);
+* `*.localhost` cannot use the proxy.
+
+However, apparently SOCKS authentication is supported.
 
 ### CURL
 
@@ -355,3 +364,4 @@ In this case, we currently cannot prevent other local users from accessing the s
 * [Chromium feature request - Support HTTP over Unix Sockets](https://bugs.chromium.org/p/chromium/issues/detail?id=451721)
 * [Firefox feature request - Support HTTP over unix domain sockets](https://bugzilla.mozilla.org/show_bug.cgi?id=1688774)
 * [WHATWG feature quest - Addressing HTTP servers over Unix domain sockets](https://github.com/whatwg/url/issues/577)
+* [proxy.onRequest failure to bypass proxy for localhost](https://bugzilla.mozilla.org/show_bug.cgi?id=1854324)
