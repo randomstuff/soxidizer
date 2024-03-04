@@ -420,7 +420,7 @@ which can talk to a SOCKS proxy over UDS.
 
 We can have Soxidizer listen on TCP localhost instead.
 In this case, we currently cannot prevent other local users from accessing the services
-(on Linux, we could try to use `/proc/net/tcp` in order to find the peer used
+(on Linux, we could try to use `/proc/net/tcp` in order to find the UID of the peer
 but I am afraid this could be vulnerable to time-of-check to time-of-use race conditions).
 Chrome [does not support authentication for SOCKS5](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md#SOCKSv5-proxy-scheme).
 
