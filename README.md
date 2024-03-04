@@ -2,14 +2,14 @@
 
 ## Overview
 
-![Screenshot](doc/screenshot-commented.png)
-
 **Summary:**
 
 * Serve your local web applications (or other services) over Unix domain sockets (UDS).
 * Give them a nice name such as `http://myapp.foo.localhost` (instead of `http://localhost:9405`).
 * Other users on the system cannot access your local applications.
 * Works with Firefox (with [FoxyProxy](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/)) only.
+
+![Screenshot](doc/screenshot-commented.png)
 
 **How:**
 Soxidizer is [SOCKS5](https://datatracker.ietf.org/doc/html/rfc1928) proxy
