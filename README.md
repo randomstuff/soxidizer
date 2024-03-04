@@ -1,13 +1,5 @@
 # Soxidizer
 
-Warning: this is a prototype!
-
-Warning: setting up a proxy for localhost currently
-[does not work](https://github.com/foxyproxy/browser-extension/issues/50)
-with [FoxyProxy](https://addons.mozilla.org/en-US/firefox/addon/foxyproxy-standard/) standard
-but only with [FoxyProxy Basic](https://addons.mozilla.org/fr/firefox/addon/foxyproxy-basic/).
-This should be fixed soon.
-
 ## Overview
 
 ![Screenshot](doc/screenshot-commented.png)
