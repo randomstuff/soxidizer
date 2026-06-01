@@ -135,7 +135,7 @@ Requires=soxidizer.socket
 ConditionUser=!root
 
 [Service]
-ExecStart=%h/bin/soxidizer
+ExecStart=%h/bin/soxidizer --directory %t/publish
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 NoNewPrivileges=yes
