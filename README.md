@@ -267,9 +267,13 @@ Sdd a new Proxy in the "proxies" tab:
 Add a pattern for this proxy:
 
 * use "include" for include,
-* choose "wildcard" for type,
-* enter something such as `*://*.foo.localhost` for the pattern,
+* <del>choose "wildcard" for type,</del>
+* <del>enter something such as `*://*.foo.localhost` for the pattern</del>,
+* choose "Reg Exp" for type;
+* enter something such as `^(http|ws)s?://[-a-zA-Z0-9]*\.foo\.localhost/` for the pattern;
 * make sure it is enabled,
+
+WARNING: I recommend [against using wildcards](https://github.com/foxyproxy/browser-extension/issues/152) for FoxyProxy rules.
 
 Select the "proxy by patterns" mode in order for the pattern to be honored.
 
